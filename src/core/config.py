@@ -1,87 +1,107 @@
 """Configuration loading and access utilities."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict
 
 import yaml
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class Paths:
-    database: Path
+class FaceRecognitionConfig(BaseModel):
+    """Configuration options for face recognition workflows."""
+
+    enabled: bool = Field(default=False)
+    model_dir: Path = Field(..., description="Directory containing face recognition models")
+
+
+class JobsConfig(BaseModel):
+    """Settings controlling background job execution."""
+
+    max_workers: int = Field(default=4, ge=1)
+
+
+class AppConfig(BaseModel):
+    """Top-level application configuration."""
+
+    database_path: Path
     cache_dir: Path
-    models_dir: Path
     logs_dir: Path
-
-
-@dataclass
-class FaceModel:
-    embedding_model: Path
-    det_threshold: float
-    max_batch: int
-
-
-@dataclass
-class UISettings:
-    theme: str
-    language: str
-    auto_scan_on_startup: bool
-
-
-@dataclass
-class Config:
-    paths: Paths
     thumb_sizes: Dict[str, int]
     supported_extensions: list[str]
-    face_model: FaceModel
-    ui: UISettings
+    face_recognition: FaceRecognitionConfig
+    jobs: JobsConfig
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
-_DEFAULT_CONFIG = "config/default.yaml"
-_USER_CONFIG = "config/user.yaml"
+DEFAULT_CONFIG_PATH = Path("config/default.yaml")
+USER_CONFIG_PATH = Path("config/user.yaml")
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
+    """Safely load a YAML file, returning an empty dict when missing."""
+
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as handle:
         return yaml.safe_load(handle) or {}
 
 
-def load_config(project_root: Path) -> Config:
-    """Load default + user config into a strongly-typed object."""
-    default_raw = _load_yaml(project_root / _DEFAULT_CONFIG)
-    user_raw = _load_yaml(project_root / _USER_CONFIG)
-    merged = {**default_raw, **user_raw}
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge two dictionaries without mutating inputs."""
 
-    paths_raw = merged.get("paths", {})
-    paths = Paths(
-        database=project_root / paths_raw.get("database", "data/db.sqlite3"),
-        cache_dir=project_root / paths_raw.get("cache_dir", "data/cache"),
-        models_dir=project_root / paths_raw.get("models_dir", "data/models"),
-        logs_dir=project_root / paths_raw.get("logs_dir", "logs"),
-    )
+    merged: Dict[str, Any] = {**base}
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
-    face_raw = merged.get("face_model", {})
-    face_model = FaceModel(
-        embedding_model=paths.models_dir / face_raw.get("embedding_model", "models/model.onnx"),
-        det_threshold=float(face_raw.get("det_threshold", 0.4)),
-        max_batch=int(face_raw.get("max_batch", 16)),
-    )
 
-    ui_raw = merged.get("ui", {})
-    ui = UISettings(
-        theme=ui_raw.get("theme", "system"),
-        language=ui_raw.get("language", "en"),
-        auto_scan_on_startup=bool(ui_raw.get("auto_scan_on_startup", True)),
-    )
+def _find_repo_root() -> Path:
+    """Locate the repository root by searching for the config directory."""
 
-    return Config(
-        paths=paths,
-        thumb_sizes=merged.get("thumb_sizes", {}),
-        supported_extensions=merged.get("supported_extensions", []),
-        face_model=face_model,
-        ui=ui,
+    current = Path(__file__).resolve()
+    for ancestor in current.parents:
+        if (ancestor / DEFAULT_CONFIG_PATH).exists():
+            return ancestor
+    raise FileNotFoundError("Could not locate repository root containing config/default.yaml")
+
+
+def _resolve_path(value: str | Path, repo_root: Path) -> Path:
+    """Convert a path value to an absolute path anchored at the repository root."""
+
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return candidate
+    return (repo_root / candidate).resolve()
+
+
+@lru_cache(maxsize=1)
+def load_config() -> AppConfig:
+    """Load and cache the application configuration."""
+
+    repo_root = _find_repo_root()
+    default_raw = _load_yaml(repo_root / DEFAULT_CONFIG_PATH)
+    user_raw = _load_yaml(repo_root / USER_CONFIG_PATH)
+    merged = _deep_merge(default_raw, user_raw)
+
+    face_raw = merged.get("face_recognition", {})
+    jobs_raw = merged.get("jobs", {})
+
+    return AppConfig(
+        database_path=_resolve_path(merged.get("database_path", "data/photos.db"), repo_root),
+        cache_dir=_resolve_path(merged.get("cache_dir", "data/cache"), repo_root),
+        logs_dir=_resolve_path(merged.get("logs_dir", "logs"), repo_root),
+        thumb_sizes=dict(merged.get("thumb_sizes", {})),
+        supported_extensions=list(merged.get("supported_extensions", [])),
+        face_recognition=FaceRecognitionConfig(
+            enabled=bool(face_raw.get("enabled", False)),
+            model_dir=_resolve_path(face_raw.get("model_dir", "data/models/insightface"), repo_root),
+        ),
+        jobs=JobsConfig(max_workers=int(jobs_raw.get("max_workers", 4))),
     )
