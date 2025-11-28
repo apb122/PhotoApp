@@ -1,20 +1,64 @@
-"""Entry point for the Photo Manager application."""
+"""Application entry point for Photo Manager."""
 from __future__ import annotations
 
+import logging
+import sys
 from pathlib import Path
 
-from src.core.config import Config, load_config
-from src.services.jobs import JobManager
-from src.ui.main_window import launch
+from PySide6.QtWidgets import QApplication
+
+# Ensure project src directory is on sys.path when running as a script
+PROJECT_ROOT = Path(__file__).resolve().parent
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from src.core.config import Config, load_config  # noqa: E402
+from src.core import db as db_module  # noqa: E402
+from src.services.jobs import JobManager  # noqa: E402
+from src.ui.main_window import MainWindow  # noqa: E402
 
 
-def main() -> None:
-    """Initialize configuration, job manager, and start the Qt application."""
-    project_root = Path(__file__).parent
-    config = load_config(project_root)
+def configure_logging(logs_dir: Path) -> None:
+    """Configure application logging to file and stdout."""
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / "app.log"
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(log_file, encoding="utf-8"),
+        ],
+    )
+
+
+def initialize_database(config: Config) -> None:
+    """Initialize the SQLite database schema."""
+    if hasattr(db_module, "init_database"):
+        db_module.init_database(config)  # type: ignore[call-arg]
+        return
+
+    connection = db_module.get_connection(config)
+    try:
+        db_module.ensure_schema(connection)
+    finally:
+        connection.close()
+
+
+def main() -> int:
+    """Load configuration, initialize services, and start the Qt application."""
+    config = load_config(PROJECT_ROOT)
+    configure_logging(Path(config.paths.logs_dir))
+    initialize_database(config)
+
     job_manager = JobManager()
-    launch(config, job_manager)
+    app = QApplication(sys.argv)
+    window = MainWindow(config=config, job_manager=job_manager)
+    window.show()
+    return app.exec()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
