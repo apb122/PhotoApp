@@ -1,0 +1,28 @@
+# Default configuration for the Photo Manager application
+paths:
+  database: data/db.sqlite3
+  cache_dir: data/cache
+  models_dir: data/models
+  logs_dir: logs
+
+thumb_sizes:
+  small: 256
+  medium: 512
+  large: 1024
+
+supported_extensions:
+  - .jpg
+  - .jpeg
+  - .png
+  - .heic
+  - .cr2
+
+face_model:
+  embedding_model: models/w600k_r50.onnx
+  det_threshold: 0.4
+  max_batch: 16
+
+ui:
+  theme: system
+  language: en
+  auto_scan_on_startup: true
