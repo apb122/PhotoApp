@@ -10,7 +10,10 @@ from src.core.faces import FaceEmbedder
 
 class FaceIndexer:
     def __init__(self, config: Config):
-        self.embedder = FaceEmbedder(config.paths.models_dir / config.face_model.embedding_model)
+        model_dir = getattr(config.face_recognition, "model_dir", None)
+        if model_dir is None:
+            raise RuntimeError("Face recognition `model_dir` is not configured")
+        self.embedder = FaceEmbedder(Path(model_dir))
 
     def index_faces(self, photos: Iterable[Path]) -> None:
         for photo_path in photos:

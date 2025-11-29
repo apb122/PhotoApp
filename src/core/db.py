@@ -21,7 +21,7 @@ SessionLocal: sessionmaker[Session] | None = None
 
 
 def _ensure_database_path(app_config: AppConfig) -> Path:
-    database_path = Path(app_config.paths.database)
+    database_path = Path(app_config.database_path)
     database_path.parent.mkdir(parents=True, exist_ok=True)
     return database_path
 

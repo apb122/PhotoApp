@@ -36,21 +36,15 @@ def configure_logging(logs_dir: Path) -> None:
 
 def initialize_database(config: Config) -> None:
     """Initialize the SQLite database schema."""
-    if hasattr(db_module, "init_database"):
-        db_module.init_database(config)  # type: ignore[call-arg]
-        return
-
-    connection = db_module.get_connection(config)
-    try:
-        db_module.ensure_schema(connection)
-    finally:
-        connection.close()
+    # Use the canonical init path on the DB module which creates engine,
+    # session factory and tables.
+    db_module.init_database(config)
 
 
 def main() -> int:
     """Load configuration, initialize services, and start the Qt application."""
     config = load_config(PROJECT_ROOT)
-    configure_logging(Path(config.paths.logs_dir))
+    configure_logging(Path(config.logs_dir))
     initialize_database(config)
 
     job_manager = JobManager()

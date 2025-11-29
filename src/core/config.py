@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict
 
 import yaml
@@ -35,6 +36,21 @@ class AppConfig(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+    @property
+    def paths(self) -> SimpleNamespace:
+        """Compatibility accessor used by older modules expecting `config.paths.*`.
+
+        Returns a simple namespace with attributes: `database`, `cache_dir`,
+        `logs_dir`, and `models_dir`.
+        """
+
+        return SimpleNamespace(
+            database=self.database_path,
+            cache_dir=self.cache_dir,
+            logs_dir=self.logs_dir,
+            models_dir=self.face_recognition.model_dir,
+        )
 
 
 DEFAULT_CONFIG_PATH = Path("config/default.yaml")
@@ -82,10 +98,19 @@ def _resolve_path(value: str | Path, repo_root: Path) -> Path:
 
 
 @lru_cache(maxsize=1)
-def load_config() -> AppConfig:
-    """Load and cache the application configuration."""
+def load_config(repo_root: Path | None = None) -> AppConfig:
+    """Load and cache the application configuration.
 
-    repo_root = _find_repo_root()
+    If `repo_root` is provided, it will be used as the repository root. When
+    omitted the code attempts to locate the root by searching for the
+    `config/default.yaml` file.
+    """
+
+    if repo_root is None:
+        repo_root = _find_repo_root()
+    else:
+        repo_root = Path(repo_root)
+
     default_raw = _load_yaml(repo_root / DEFAULT_CONFIG_PATH)
     user_raw = _load_yaml(repo_root / USER_CONFIG_PATH)
     merged = _deep_merge(default_raw, user_raw)
@@ -105,3 +130,7 @@ def load_config() -> AppConfig:
         ),
         jobs=JobsConfig(max_workers=int(jobs_raw.get("max_workers", 4))),
     )
+
+
+# Backwards-compatible export: some modules import `Config`.
+Config = AppConfig
